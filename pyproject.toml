@@ -36,6 +36,7 @@ packages = ["backend/app"]
 pythonpath = ["backend"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = ["integration: requires a live PostgreSQL database"]
 
 [tool.ruff]
 line-length = 100
@@ -43,4 +44,3 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
-

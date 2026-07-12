@@ -42,6 +42,14 @@ uvicorn app.main:app --reload --app-dir backend
 pytest -q
 ```
 
+需要本地 PostgreSQL 的幂等同步集成测试：
+
+```bash
+RUN_INTEGRATION_TESTS=1 pytest -q tests/integration
+```
+
+GitHub Actions 会启动 PostgreSQL 16，执行 Alembic 迁移、Ruff、单元测试和集成测试。
+
 ## 目录
 
 ```text
