@@ -39,3 +39,4 @@ jobs:
       - run: alembic upgrade head
       - run: ruff check backend tests alembic
       - run: pytest -q
+      - run: docker build --tag stockpilot-api:test .
