@@ -20,6 +20,10 @@ docker compose --env-file .env.vps -f docker-compose.vps.yml up -d
 docker compose --env-file .env.vps -f docker-compose.vps.yml ps
 ```
 
+On low-resource VPS hosts, the API health probe has a 60-second startup grace
+period and a 15-second timeout so Python cold starts do not cause false
+`unhealthy` results.
+
 ## 小批量验收
 
 ```bash

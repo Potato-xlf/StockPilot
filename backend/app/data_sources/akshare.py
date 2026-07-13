@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import date
 from decimal import Decimal
 
@@ -6,6 +7,8 @@ import akshare as ak
 import pandas as pd
 
 from app.data_sources.base import DailyQuoteRecord, MarketDataSource, StockRecord
+
+logger = logging.getLogger(__name__)
 
 
 def _decimal(value: object) -> Decimal | None:
@@ -20,6 +23,12 @@ def _exchange(symbol: str) -> str:
     if symbol.startswith(("4", "8")):
         return "BSE"
     return "SZSE"
+
+
+def _tencent_symbol(symbol: str) -> str:
+    exchange = _exchange(symbol)
+    prefix = {"SSE": "sh", "BSE": "bj", "SZSE": "sz"}[exchange]
+    return f"{prefix}{symbol}"
 
 
 class AKShareDataSource(MarketDataSource):
@@ -49,14 +58,46 @@ class AKShareDataSource(MarketDataSource):
     async def fetch_daily_quotes(
         self, symbol: str, start: date, end: date
     ) -> list[DailyQuoteRecord]:
-        frame = await asyncio.to_thread(
-            ak.stock_zh_a_hist,
-            symbol=symbol,
-            period="daily",
-            start_date=start.strftime("%Y%m%d"),
-            end_date=end.strftime("%Y%m%d"),
-            adjust="",
-        )
+        try:
+            frame = await asyncio.to_thread(
+                ak.stock_zh_a_hist,
+                symbol=symbol,
+                period="daily",
+                start_date=start.strftime("%Y%m%d"),
+                end_date=end.strftime("%Y%m%d"),
+                adjust="",
+            )
+        except Exception as exc:
+            logger.warning(
+                "AKShare Eastmoney daily quotes failed; using Tencent fallback "
+                "symbol=%s error=%s",
+                symbol,
+                exc,
+            )
+            frame = await asyncio.to_thread(
+                ak.stock_zh_a_hist_tx,
+                symbol=_tencent_symbol(symbol),
+                start_date=start.strftime("%Y%m%d"),
+                end_date=end.strftime("%Y%m%d"),
+                adjust="",
+            )
+            return [
+                DailyQuoteRecord(
+                    symbol=symbol,
+                    trade_date=pd.to_datetime(row["date"]).date(),
+                    open=_decimal(row["open"]),
+                    high=_decimal(row["high"]),
+                    low=_decimal(row["low"]),
+                    close=_decimal(row["close"]),
+                    volume=_decimal(row.get("amount")),
+                    amount=None,
+                    amplitude=None,
+                    pct_change=None,
+                    change=None,
+                    turnover_rate=None,
+                )
+                for _, row in frame.iterrows()
+            ]
         records: list[DailyQuoteRecord] = []
         for _, row in frame.iterrows():
             records.append(
