@@ -50,6 +50,8 @@ RUN_INTEGRATION_TESTS=1 pytest -q tests/integration
 
 GitHub Actions 会启动 PostgreSQL 16，执行 Alembic 迁移、Ruff、单元测试和集成测试。
 
+共享低资源VPS请使用预构建镜像和资源受限配置，详见 `docs/vps-deployment.md`。
+
 ## 目录
 
 ```text
