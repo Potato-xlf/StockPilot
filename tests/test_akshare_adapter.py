@@ -3,7 +3,6 @@ from decimal import Decimal
 
 import pandas as pd
 import pytest
-
 from app.data_sources.akshare import AKShareDataSource
 
 
