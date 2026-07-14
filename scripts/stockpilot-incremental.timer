@@ -1,0 +1,11 @@
+[Unit]
+Description=Run StockPilot incremental sync after A-share market close
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 18:30:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=5m
+Unit=stockpilot-incremental.service
+
+[Install]
+WantedBy=timers.target

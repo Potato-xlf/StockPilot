@@ -1,5 +1,7 @@
 import asyncio
 import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import typer
 
@@ -35,6 +37,42 @@ def sync_market_data(
         )
         try:
             result = await service.sync(days=days, limit=limit)
+            typer.echo(json.dumps(result.__dict__, ensure_ascii=False))
+            if result.failed_symbols:
+                raise typer.Exit(code=2)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
+@app.command("sync-incremental")
+def sync_incremental(
+    lookback_days: int = typer.Option(
+        5, min=1, help="Overlap window of recent trading days"
+    ),
+    limit: int | None = typer.Option(
+        None, min=1, help="Limit the managed universe for smoke tests"
+    ),
+) -> None:
+    """Update the managed stock universe after close; skip non-trading days."""
+    configure_logging()
+    settings = get_settings()
+
+    async def run() -> None:
+        service = MarketSyncService(
+            AKShareDataSource(),
+            SessionLocal,
+            settings.akshare_request_concurrency,
+            settings.akshare_request_retries,
+        )
+        try:
+            as_of = datetime.now(ZoneInfo(settings.market_timezone)).date()
+            result = await service.sync_incremental(
+                lookback_days=lookback_days,
+                limit=limit,
+                as_of=as_of,
+            )
             typer.echo(json.dumps(result.__dict__, ensure_ascii=False))
             if result.failed_symbols:
                 raise typer.Exit(code=2)
