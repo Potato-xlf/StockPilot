@@ -39,6 +39,7 @@ services:
       LOG_LEVEL: INFO
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-stockpilot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stockpilot}
       DATABASE_SYNC_URL: postgresql+psycopg://${POSTGRES_USER:-stockpilot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stockpilot}
+      MARKET_TIMEZONE: ${MARKET_TIMEZONE:-Asia/Shanghai}
       AKSHARE_REQUEST_CONCURRENCY: ${AKSHARE_REQUEST_CONCURRENCY:-1}
       AKSHARE_REQUEST_RETRIES: ${AKSHARE_REQUEST_RETRIES:-5}
     command:

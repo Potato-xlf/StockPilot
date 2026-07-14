@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Numeric, String, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -50,3 +50,20 @@ class DailyQuote(Base):
     turnover_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="akshare")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DataSyncRun(Base):
+    __tablename__ = "data_sync_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    requested_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    stock_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    quote_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_symbols: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    message: Mapped[str | None] = mapped_column(String(512))
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

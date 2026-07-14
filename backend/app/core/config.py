@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://stockpilot:stockpilot@localhost:5432/stockpilot"
     database_sync_url: str = "postgresql+psycopg://stockpilot:stockpilot@localhost:5432/stockpilot"
     redis_url: str | None = None
+    market_timezone: str = "Asia/Shanghai"
     akshare_request_concurrency: int = 4
     akshare_request_retries: int = 3
 

@@ -1,6 +1,6 @@
 # StockPilot
 
-StockPilot 第一阶段：A 股选股面板的数据基础层。技术栈为 Python 3.12、FastAPI、PostgreSQL、可选 Redis、Docker Compose、SQLAlchemy 与 Alembic。
+StockPilot A 股选股面板的数据基础与市场运营层。技术栈为 Python 3.12、FastAPI、PostgreSQL、可选 Redis、Docker Compose、SQLAlchemy 与 Alembic。
 
 ## 快速启动
 
@@ -28,6 +28,21 @@ docker compose exec api stockpilot sync-market-data --days 30 --limit 10
 ```
 
 命令对股票、日历和日线均执行 PostgreSQL upsert，可重复运行。单股请求自动重试；只要有股票同步失败，命令会记录股票代码并以退出码 2 结束，便于监控识别不完整批次。
+
+交易日增量更新已管理股票池：
+
+```bash
+docker compose exec api stockpilot sync-incremental --lookback-days 5
+```
+
+数据质量与市场总览：
+
+```bash
+curl http://localhost:8000/api/v1/data-quality/status
+curl http://localhost:8000/api/v1/market/overview
+```
+
+自动增量任务和指标含义见 `docs/phase2-operations.md`。
 
 ## 本地开发
 
