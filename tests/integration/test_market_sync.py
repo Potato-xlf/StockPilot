@@ -1,6 +1,7 @@
 import os
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 from app.data_sources.base import DailyQuoteRecord, MarketDataSource, StockRecord
@@ -94,7 +95,10 @@ async def test_market_sync_is_idempotent() -> None:
             select(DataSyncRun).order_by(DataSyncRun.id.desc()).limit(1)
         )
         quality = await MarketInsightsService(session).data_quality(
-            today=date(2026, 7, 10)
+            now=datetime(2026, 7, 10, 18, tzinfo=ZoneInfo("Asia/Shanghai"))
+        )
+        intraday_quality = await MarketInsightsService(session).data_quality(
+            now=datetime(2026, 7, 10, 13, tzinfo=ZoneInfo("Asia/Shanghai"))
         )
         overview = await MarketInsightsService(session).market_overview()
 
@@ -105,6 +109,8 @@ async def test_market_sync_is_idempotent() -> None:
     assert latest_run is not None and latest_run.status == "skipped"
     assert quality.status == "ok"
     assert quality.coverage_pct == 100.0
+    assert intraday_quality.expected_trade_date == date(2026, 7, 9)
+    assert intraday_quality.status == "ok"
     assert overview is not None
     assert overview.quoted_stocks == 2
     assert overview.unchanged == 2

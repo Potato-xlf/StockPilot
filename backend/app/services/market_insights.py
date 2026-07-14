@@ -1,11 +1,15 @@
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, case, distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.models import DailyQuote, DataSyncRun, Stock, TradingCalendar
+
+MARKET_TIMEZONE = ZoneInfo("Asia/Shanghai")
+DAILY_DATA_READY_TIME = time(15, 30)
 
 
 @dataclass(frozen=True)
@@ -46,8 +50,13 @@ class MarketInsightsService:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def data_quality(self, today: date | None = None) -> DataQualitySnapshot:
-        effective_today = today or date.today()
+    async def data_quality(self, now: datetime | None = None) -> DataQualitySnapshot:
+        market_now = now or datetime.now(MARKET_TIMEZONE)
+        if market_now.tzinfo is None:
+            market_now = market_now.replace(tzinfo=MARKET_TIMEZONE)
+        else:
+            market_now = market_now.astimezone(MARKET_TIMEZONE)
+        effective_today = market_now.date()
         latest_trade_date = await self.session.scalar(select(func.max(DailyQuote.trade_date)))
         expected_trade_date = await self.session.scalar(
             select(func.max(TradingCalendar.trade_date)).where(
@@ -55,6 +64,16 @@ class MarketInsightsService:
                 TradingCalendar.trade_date <= effective_today,
             )
         )
+        if (
+            expected_trade_date == effective_today
+            and market_now.time().replace(tzinfo=None) < DAILY_DATA_READY_TIME
+        ):
+            expected_trade_date = await self.session.scalar(
+                select(func.max(TradingCalendar.trade_date)).where(
+                    TradingCalendar.is_open.is_(True),
+                    TradingCalendar.trade_date < effective_today,
+                )
+            )
         managed_stocks = int(
             await self.session.scalar(
                 select(func.count()).select_from(Stock).where(Stock.list_status == "listed")
