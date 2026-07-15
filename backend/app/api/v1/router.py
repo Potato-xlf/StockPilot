@@ -1,13 +1,18 @@
 import asyncio
 import time
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.data_sources import AKShareDataSource
 from app.db.session import get_session
-from app.schemas.market import DataQualityResponse, MarketOverviewResponse
+from app.schemas.market import (
+    DataQualityResponse,
+    MarketOverviewResponse,
+    SectorRankingResponse,
+    UniverseStatusResponse,
+)
 from app.schemas.status import DataSourceStatusResponse
 from app.services.market_insights import MarketInsightsService
 
@@ -64,3 +69,32 @@ async def market_overview(
     if snapshot is None:
         raise HTTPException(status_code=404, detail="market data is not available")
     return MarketOverviewResponse(**snapshot.__dict__)
+
+
+@router.get("/universe/status", response_model=UniverseStatusResponse)
+async def universe_status(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> UniverseStatusResponse:
+    snapshot = await MarketInsightsService(session).universe_status()
+    return UniverseStatusResponse(**snapshot.__dict__)
+
+
+@router.get("/sectors/ranking", response_model=SectorRankingResponse)
+async def sector_ranking(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    sector_type: Literal["industry", "concept"] = "industry",
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> SectorRankingResponse:
+    snapshot = await MarketInsightsService(session).sector_ranking(sector_type, limit)
+    if snapshot is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"{sector_type} sector data is not available",
+        )
+    return SectorRankingResponse(
+        as_of=snapshot.as_of,
+        previous_trade_date=snapshot.previous_trade_date,
+        sector_type=snapshot.sector_type,
+        total_sectors=snapshot.total_sectors,
+        items=[item.__dict__ for item in snapshot.items],
+    )

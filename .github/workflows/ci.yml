@@ -13,20 +13,20 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: stockpilot
+          POSTGRES_DB: stockpilot_test
           POSTGRES_USER: stockpilot
           POSTGRES_PASSWORD: stockpilot
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U stockpilot -d stockpilot"
+          --health-cmd "pg_isready -U stockpilot -d stockpilot_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
 
     env:
-      DATABASE_URL: postgresql+asyncpg://stockpilot:stockpilot@localhost:5432/stockpilot
-      DATABASE_SYNC_URL: postgresql+psycopg://stockpilot:stockpilot@localhost:5432/stockpilot
+      DATABASE_URL: postgresql+asyncpg://stockpilot:stockpilot@localhost:5432/stockpilot_test
+      DATABASE_SYNC_URL: postgresql+psycopg://stockpilot:stockpilot@localhost:5432/stockpilot_test
       RUN_INTEGRATION_TESTS: "1"
 
     steps:

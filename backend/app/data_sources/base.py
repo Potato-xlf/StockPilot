@@ -27,6 +27,28 @@ class DailyQuoteRecord:
     turnover_rate: Decimal | None = None
 
 
+@dataclass(frozen=True)
+class SectorRecord:
+    code: str
+    name: str
+    sector_type: str
+    latest_price: Decimal | None = None
+    pct_change: Decimal | None = None
+    turnover_rate: Decimal | None = None
+    total_market_cap: Decimal | None = None
+    advancers: int | None = None
+    decliners: int | None = None
+    leading_stock: str | None = None
+    leading_stock_pct: Decimal | None = None
+
+
+@dataclass(frozen=True)
+class SectorMemberRecord:
+    symbol: str
+    name: str
+    exchange: str
+
+
 class MarketDataSource(ABC):
     name: str
 
@@ -43,3 +65,11 @@ class MarketDataSource(ABC):
     async def fetch_daily_quotes(
         self, symbol: str, start: date, end: date
     ) -> list[DailyQuoteRecord]: ...
+
+    @abstractmethod
+    async def fetch_sectors(self, sector_type: str) -> list[SectorRecord]: ...
+
+    @abstractmethod
+    async def fetch_sector_members(
+        self, sector_code: str, sector_type: str
+    ) -> list[SectorMemberRecord]: ...

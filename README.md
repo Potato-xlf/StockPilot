@@ -70,6 +70,25 @@ curl http://localhost:8000/api/v1/market/overview
 
 自动增量任务和指标含义见 `docs/phase2-operations.md`。
 
+## 全市场股票池与板块轮动
+
+完整股票元数据与受控批次日线：
+
+```bash
+docker compose exec api stockpilot sync-stock-universe
+docker compose exec api stockpilot sync-quote-batch --days 30 --batch-size 100 --offset 0
+curl http://localhost:8000/api/v1/universe/status
+```
+
+行业/概念板块及轮动排名：
+
+```bash
+docker compose exec api stockpilot sync-sector-data --sector-type industry
+curl 'http://localhost:8000/api/v1/sectors/ranking?sector_type=industry&limit=20'
+```
+
+全市场元数据不会自动进入日线管理池。批次扩展策略、板块评分定义和测试数据库保护见 `docs/phase3-universe-sectors.md`。
+
 ## 本地开发
 
 ```bash

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run StockPilot sector snapshots after A-share market close
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 18:45:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=10m
+Unit=stockpilot-sectors.service
+
+[Install]
+WantedBy=timers.target

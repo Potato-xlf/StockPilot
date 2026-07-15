@@ -6,7 +6,15 @@ from sqlalchemy import and_, case, distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.models import DailyQuote, DataSyncRun, Stock, TradingCalendar
+from app.models import (
+    DailyQuote,
+    DataSyncRun,
+    Sector,
+    SectorMember,
+    SectorSnapshot,
+    Stock,
+    TradingCalendar,
+)
 
 MARKET_TIMEZONE = ZoneInfo("Asia/Shanghai")
 DAILY_DATA_READY_TIME = time(15, 30)
@@ -46,6 +54,85 @@ class MarketOverviewSnapshot:
     data_quality_status: str
 
 
+@dataclass(frozen=True)
+class SectorRankingItemSnapshot:
+    rank: int
+    previous_rank: int | None
+    rank_change: int | None
+    code: str
+    name: str
+    score: float
+    pct_change: float | None
+    turnover_rate: float | None
+    breadth_pct: float | None
+    advancers: int | None
+    decliners: int | None
+    leading_stock: str | None
+    leading_stock_pct: float | None
+    member_count: int
+
+
+@dataclass(frozen=True)
+class SectorRankingSnapshot:
+    as_of: date
+    previous_trade_date: date | None
+    sector_type: str
+    total_sectors: int
+    items: list[SectorRankingItemSnapshot]
+
+
+@dataclass(frozen=True)
+class UniverseStatusSnapshot:
+    total_listed_stocks: int
+    quote_enabled_stocks: int
+    pending_quote_stocks: int
+    exchange_counts: dict[str, int]
+    last_universe_sync_status: str | None
+    last_universe_sync_finished_at: datetime | None
+    last_quote_batch_status: str | None
+    last_quote_batch_finished_at: datetime | None
+
+
+def _percentile(value: float | None, values: list[float]) -> float:
+    if value is None or not values:
+        return 0.0
+    less = sum(item < value for item in values)
+    equal = sum(item == value for item in values)
+    return (less + equal / 2) / len(values) * 100
+
+
+def _rank_sector_rows(rows: list[dict]) -> list[dict]:
+    pct_values = [row["pct_change"] for row in rows if row["pct_change"] is not None]
+    turnover_values = [
+        row["turnover_rate"] for row in rows if row["turnover_rate"] is not None
+    ]
+    breadth_values = [row["breadth_pct"] for row in rows if row["breadth_pct"] is not None]
+    leader_values = [
+        row["leading_stock_pct"]
+        for row in rows
+        if row["leading_stock_pct"] is not None
+    ]
+    ranked = []
+    for row in rows:
+        score = (
+            _percentile(row["pct_change"], pct_values) * 0.50
+            + _percentile(row["breadth_pct"], breadth_values) * 0.25
+            + _percentile(row["turnover_rate"], turnover_values) * 0.15
+            + _percentile(row["leading_stock_pct"], leader_values) * 0.10
+        )
+        ranked.append({**row, "score": round(score, 2)})
+    return sorted(
+        ranked,
+        key=lambda row: (
+            row["score"],
+            row["pct_change"]
+            if row["pct_change"] is not None
+            else float("-inf"),
+        ),
+        reverse=True,
+    )
+
+
 class MarketInsightsService:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -57,7 +144,11 @@ class MarketInsightsService:
         else:
             market_now = market_now.astimezone(MARKET_TIMEZONE)
         effective_today = market_now.date()
-        latest_trade_date = await self.session.scalar(select(func.max(DailyQuote.trade_date)))
+        latest_trade_date = await self.session.scalar(
+            select(func.max(DailyQuote.trade_date))
+            .join(Stock, Stock.symbol == DailyQuote.symbol)
+            .where(Stock.quote_enabled.is_(True))
+        )
         expected_trade_date = await self.session.scalar(
             select(func.max(TradingCalendar.trade_date)).where(
                 TradingCalendar.is_open.is_(True),
@@ -77,6 +168,7 @@ class MarketInsightsService:
         managed_stocks = int(
             await self.session.scalar(
                 select(func.count()).select_from(Stock).where(Stock.list_status == "listed")
+                .where(Stock.quote_enabled.is_(True))
             )
             or 0
         )
@@ -105,14 +197,18 @@ class MarketInsightsService:
             await self.session.scalar(
                 select(func.count(distinct(DailyQuote.symbol))).where(
                     DailyQuote.trade_date == latest_trade_date
-                )
+                ).join(Stock, Stock.symbol == DailyQuote.symbol)
+                .where(Stock.quote_enabled.is_(True))
             )
             or 0
         )
         invalid_ohlc_rows = int(
             await self.session.scalar(
-                select(func.count()).select_from(DailyQuote).where(
+                select(func.count()).select_from(DailyQuote)
+                .join(Stock, Stock.symbol == DailyQuote.symbol)
+                .where(
                     DailyQuote.trade_date == latest_trade_date,
+                    Stock.quote_enabled.is_(True),
                     or_(
                         DailyQuote.open <= 0,
                         DailyQuote.high <= 0,
@@ -130,8 +226,11 @@ class MarketInsightsService:
         )
         nonpositive_volume_rows = int(
             await self.session.scalar(
-                select(func.count()).select_from(DailyQuote).where(
+                select(func.count()).select_from(DailyQuote)
+                .join(Stock, Stock.symbol == DailyQuote.symbol)
+                .where(
                     DailyQuote.trade_date == latest_trade_date,
+                    Stock.quote_enabled.is_(True),
                     DailyQuote.volume <= 0,
                 )
             )
@@ -139,8 +238,11 @@ class MarketInsightsService:
         )
         missing_amount_rows = int(
             await self.session.scalar(
-                select(func.count()).select_from(DailyQuote).where(
+                select(func.count()).select_from(DailyQuote)
+                .join(Stock, Stock.symbol == DailyQuote.symbol)
+                .where(
                     DailyQuote.trade_date == latest_trade_date,
+                    Stock.quote_enabled.is_(True),
                     DailyQuote.amount.is_(None),
                 )
             )
@@ -186,13 +288,72 @@ class MarketInsightsService:
             message=message,
         )
 
+    async def universe_status(self) -> UniverseStatusSnapshot:
+        total_listed = int(
+            await self.session.scalar(
+                select(func.count()).select_from(Stock).where(Stock.list_status == "listed")
+            )
+            or 0
+        )
+        quote_enabled = int(
+            await self.session.scalar(
+                select(func.count())
+                .select_from(Stock)
+                .where(
+                    Stock.list_status == "listed",
+                    Stock.quote_enabled.is_(True),
+                )
+            )
+            or 0
+        )
+        exchange_counts = {
+            exchange: int(count)
+            for exchange, count in await self.session.execute(
+                select(Stock.exchange, func.count())
+                .where(Stock.list_status == "listed")
+                .group_by(Stock.exchange)
+                .order_by(Stock.exchange)
+            )
+        }
+        last_universe = await self.session.scalar(
+            select(DataSyncRun)
+            .where(DataSyncRun.job_type == "universe")
+            .order_by(DataSyncRun.started_at.desc())
+            .limit(1)
+        )
+        last_batch = await self.session.scalar(
+            select(DataSyncRun)
+            .where(DataSyncRun.job_type == "quote_batch")
+            .order_by(DataSyncRun.started_at.desc())
+            .limit(1)
+        )
+        return UniverseStatusSnapshot(
+            total_listed_stocks=total_listed,
+            quote_enabled_stocks=quote_enabled,
+            pending_quote_stocks=max(total_listed - quote_enabled, 0),
+            exchange_counts=exchange_counts,
+            last_universe_sync_status=last_universe.status if last_universe else None,
+            last_universe_sync_finished_at=(
+                last_universe.finished_at if last_universe else None
+            ),
+            last_quote_batch_status=last_batch.status if last_batch else None,
+            last_quote_batch_finished_at=last_batch.finished_at if last_batch else None,
+        )
+
     async def market_overview(self) -> MarketOverviewSnapshot | None:
-        latest_trade_date = await self.session.scalar(select(func.max(DailyQuote.trade_date)))
+        latest_trade_date = await self.session.scalar(
+            select(func.max(DailyQuote.trade_date))
+            .join(Stock, Stock.symbol == DailyQuote.symbol)
+            .where(Stock.quote_enabled.is_(True))
+        )
         if latest_trade_date is None:
             return None
         previous_trade_date = await self.session.scalar(
-            select(func.max(DailyQuote.trade_date)).where(
-                DailyQuote.trade_date < latest_trade_date
+            select(func.max(DailyQuote.trade_date))
+            .join(Stock, Stock.symbol == DailyQuote.symbol)
+            .where(
+                DailyQuote.trade_date < latest_trade_date,
+                Stock.quote_enabled.is_(True),
             )
         )
         quality = await self.data_quality()
@@ -221,8 +382,12 @@ class MarketInsightsService:
                 func.count(current.amount),
             )
             .select_from(current)
+            .join(Stock, Stock.symbol == current.symbol)
             .outerjoin(previous, join_condition)
-            .where(current.trade_date == latest_trade_date)
+            .where(
+                current.trade_date == latest_trade_date,
+                Stock.quote_enabled.is_(True),
+            )
         )
         row = (await self.session.execute(statement)).one()
         quoted_stocks = int(row[0] or 0)
@@ -250,4 +415,120 @@ class MarketInsightsService:
             total_amount=total_amount,
             amount_coverage_pct=amount_coverage_pct,
             data_quality_status=quality.status,
+        )
+
+    async def sector_ranking(
+        self, sector_type: str, limit: int = 20
+    ) -> SectorRankingSnapshot | None:
+        if sector_type not in {"industry", "concept"}:
+            raise ValueError("sector_type must be industry or concept")
+        latest_date = await self.session.scalar(
+            select(func.max(SectorSnapshot.trade_date)).where(
+                SectorSnapshot.sector_type == sector_type
+            )
+        )
+        if latest_date is None:
+            return None
+        previous_date = await self.session.scalar(
+            select(func.max(SectorSnapshot.trade_date)).where(
+                SectorSnapshot.sector_type == sector_type,
+                SectorSnapshot.trade_date < latest_date,
+            )
+        )
+        member_counts = (
+            select(
+                SectorMember.sector_type,
+                SectorMember.sector_code,
+                func.count().label("member_count"),
+            )
+            .group_by(SectorMember.sector_type, SectorMember.sector_code)
+            .subquery()
+        )
+
+        async def fetch_rows(trade_date: date) -> list[dict]:
+            statement = (
+                select(
+                    SectorSnapshot,
+                    Sector.name,
+                    func.coalesce(member_counts.c.member_count, 0),
+                )
+                .join(
+                    Sector,
+                    and_(
+                        Sector.sector_type == SectorSnapshot.sector_type,
+                        Sector.code == SectorSnapshot.sector_code,
+                    ),
+                )
+                .outerjoin(
+                    member_counts,
+                    and_(
+                        member_counts.c.sector_type == SectorSnapshot.sector_type,
+                        member_counts.c.sector_code == SectorSnapshot.sector_code,
+                    ),
+                )
+                .where(
+                    SectorSnapshot.sector_type == sector_type,
+                    SectorSnapshot.trade_date == trade_date,
+                )
+            )
+            result = []
+            for snapshot, name, member_count in await self.session.execute(statement):
+                advancers = snapshot.advancers
+                decliners = snapshot.decliners
+                breadth_pct = None
+                if advancers is not None and decliners is not None and advancers + decliners:
+                    breadth_pct = round(advancers / (advancers + decliners) * 100, 2)
+                result.append(
+                    {
+                        "code": snapshot.sector_code,
+                        "name": name,
+                        "pct_change": (
+                            float(snapshot.pct_change)
+                            if snapshot.pct_change is not None
+                            else None
+                        ),
+                        "turnover_rate": (
+                            float(snapshot.turnover_rate)
+                            if snapshot.turnover_rate is not None
+                            else None
+                        ),
+                        "breadth_pct": breadth_pct,
+                        "advancers": advancers,
+                        "decliners": decliners,
+                        "leading_stock": snapshot.leading_stock,
+                        "leading_stock_pct": (
+                            float(snapshot.leading_stock_pct)
+                            if snapshot.leading_stock_pct is not None
+                            else None
+                        ),
+                        "member_count": int(member_count),
+                    }
+                )
+            return result
+
+        ranked = _rank_sector_rows(await fetch_rows(latest_date))
+        previous_ranks: dict[str, int] = {}
+        if previous_date is not None:
+            previous_ranked = _rank_sector_rows(await fetch_rows(previous_date))
+            previous_ranks = {
+                row["code"]: rank for rank, row in enumerate(previous_ranked, start=1)
+            }
+
+        items = []
+        for rank, row in enumerate(ranked[:limit], start=1):
+            previous_rank = previous_ranks.get(row["code"])
+            items.append(
+                SectorRankingItemSnapshot(
+                    rank=rank,
+                    previous_rank=previous_rank,
+                    rank_change=(previous_rank - rank if previous_rank is not None else None),
+                    **row,
+                )
+            )
+        return SectorRankingSnapshot(
+            as_of=latest_date,
+            previous_trade_date=previous_date,
+            sector_type=sector_type,
+            total_sectors=len(ranked),
+            items=items,
         )
