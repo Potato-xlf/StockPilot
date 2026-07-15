@@ -11,6 +11,7 @@ from app.schemas.market import (
     DataQualityResponse,
     MarketOverviewResponse,
     SectorRankingResponse,
+    SyncRunsResponse,
     UniverseStatusResponse,
 )
 from app.schemas.status import DataSourceStatusResponse
@@ -97,4 +98,17 @@ async def sector_ranking(
         sector_type=snapshot.sector_type,
         total_sectors=snapshot.total_sectors,
         items=[item.__dict__ for item in snapshot.items],
+    )
+
+
+@router.get("/sync/runs", response_model=SyncRunsResponse)
+async def sync_runs(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> SyncRunsResponse:
+    """Return recent market and sector sync runs for operations and dashboards."""
+    data_runs, sector_runs = await MarketInsightsService(session).sync_runs(limit)
+    return SyncRunsResponse(
+        data_runs=[run.__dict__ for run in data_runs],
+        sector_runs=[run.__dict__ for run in sector_runs],
     )

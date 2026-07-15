@@ -98,3 +98,42 @@ async def test_sector_and_member_mapping(monkeypatch):
     assert sectors[0].advancers == 30
     assert members[0].symbol == "000001"
     assert members[0].exchange == "SZSE"
+
+
+@pytest.mark.asyncio
+async def test_industry_sectors_fall_back_to_ths(monkeypatch):
+    def fail_eastmoney():
+        raise ConnectionError("upstream closed connection")
+
+    monkeypatch.setattr(
+        "app.data_sources.akshare.ak.stock_board_industry_name_em", fail_eastmoney
+    )
+    monkeypatch.setattr(
+        "app.data_sources.akshare.ak.stock_board_industry_name_ths",
+        lambda: pd.DataFrame([{"name": "银行", "code": "881155"}]),
+    )
+    monkeypatch.setattr(
+        "app.data_sources.akshare.ak.stock_board_industry_summary_ths",
+        lambda: pd.DataFrame(
+            [
+                {
+                    "板块": "银行",
+                    "涨跌幅": 1.2,
+                    "上涨家数": 30,
+                    "下跌家数": 10,
+                    "均价": 12.5,
+                    "领涨股": "平安银行",
+                    "领涨股-涨跌幅": 4.5,
+                }
+            ]
+        ),
+    )
+
+    sectors = await AKShareDataSource().fetch_sectors("industry")
+
+    assert len(sectors) == 1
+    assert sectors[0].code == "881155"
+    assert sectors[0].latest_price == Decimal("12.5")
+    assert sectors[0].pct_change == Decimal("1.2")
+    assert sectors[0].advancers == 30
+    assert sectors[0].leading_stock == "平安银行"

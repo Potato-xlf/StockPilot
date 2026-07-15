@@ -66,9 +66,13 @@ docker compose exec api stockpilot sync-incremental --lookback-days 5
 ```bash
 curl http://localhost:8000/api/v1/data-quality/status
 curl http://localhost:8000/api/v1/market/overview
+curl 'http://localhost:8000/api/v1/sync/runs?limit=20'
 ```
 
 自动增量任务和指标含义见 `docs/phase2-operations.md`。
+
+`/api/v1/sync/runs` 返回最近行情、股票池和板块同步记录，可用于排查
+`partial`/`error` 批次以及后续面板展示。
 
 ## 全市场股票池与板块轮动
 

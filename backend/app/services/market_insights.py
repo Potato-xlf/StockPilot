@@ -12,6 +12,7 @@ from app.models import (
     Sector,
     SectorMember,
     SectorSnapshot,
+    SectorSyncRun,
     Stock,
     TradingCalendar,
 )
@@ -93,6 +94,33 @@ class UniverseStatusSnapshot:
     last_quote_batch_finished_at: datetime | None
 
 
+@dataclass(frozen=True)
+class DataSyncRunSnapshot:
+    id: int
+    job_type: str
+    status: str
+    requested_days: int
+    stock_count: int
+    quote_count: int
+    failed_symbols: int
+    message: str | None
+    started_at: datetime
+    finished_at: datetime | None
+
+
+@dataclass(frozen=True)
+class SectorSyncRunSnapshot:
+    id: int
+    sector_type: str
+    status: str
+    sector_count: int
+    member_count: int
+    failed_sectors: int
+    message: str | None
+    started_at: datetime
+    finished_at: datetime | None
+
+
 def _percentile(value: float | None, values: list[float]) -> float:
     if value is None or not values:
         return 0.0
@@ -136,6 +164,57 @@ def _rank_sector_rows(rows: list[dict]) -> list[dict]:
 class MarketInsightsService:
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def sync_runs(
+        self, limit: int = 20
+    ) -> tuple[list[DataSyncRunSnapshot], list[SectorSyncRunSnapshot]]:
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        data_rows = (
+            await self.session.scalars(
+                select(DataSyncRun)
+                .order_by(DataSyncRun.started_at.desc(), DataSyncRun.id.desc())
+                .limit(limit)
+            )
+        ).all()
+        sector_rows = (
+            await self.session.scalars(
+                select(SectorSyncRun)
+                .order_by(SectorSyncRun.started_at.desc(), SectorSyncRun.id.desc())
+                .limit(limit)
+            )
+        ).all()
+        return (
+            [
+                DataSyncRunSnapshot(
+                    id=row.id,
+                    job_type=row.job_type,
+                    status=row.status,
+                    requested_days=row.requested_days,
+                    stock_count=row.stock_count,
+                    quote_count=row.quote_count,
+                    failed_symbols=row.failed_symbols,
+                    message=row.message,
+                    started_at=row.started_at,
+                    finished_at=row.finished_at,
+                )
+                for row in data_rows
+            ],
+            [
+                SectorSyncRunSnapshot(
+                    id=row.id,
+                    sector_type=row.sector_type,
+                    status=row.status,
+                    sector_count=row.sector_count,
+                    member_count=row.member_count,
+                    failed_sectors=row.failed_sectors,
+                    message=row.message,
+                    started_at=row.started_at,
+                    finished_at=row.finished_at,
+                )
+                for row in sector_rows
+            ],
+        )
 
     async def data_quality(self, now: datetime | None = None) -> DataQualitySnapshot:
         market_now = now or datetime.now(MARKET_TIMEZONE)

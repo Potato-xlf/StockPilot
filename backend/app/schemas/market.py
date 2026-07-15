@@ -71,3 +71,33 @@ class UniverseStatusResponse(BaseModel):
     last_universe_sync_finished_at: datetime | None
     last_quote_batch_status: str | None
     last_quote_batch_finished_at: datetime | None
+
+
+class DataSyncRunResponse(BaseModel):
+    id: int
+    job_type: str
+    status: str
+    requested_days: int
+    stock_count: int
+    quote_count: int
+    failed_symbols: int
+    message: str | None
+    started_at: datetime
+    finished_at: datetime | None
+
+
+class SectorSyncRunResponse(BaseModel):
+    id: int
+    sector_type: str
+    status: str
+    sector_count: int
+    member_count: int
+    failed_sectors: int
+    message: str | None
+    started_at: datetime
+    finished_at: datetime | None
+
+
+class SyncRunsResponse(BaseModel):
+    data_runs: list[DataSyncRunResponse]
+    sector_runs: list[SectorSyncRunResponse]

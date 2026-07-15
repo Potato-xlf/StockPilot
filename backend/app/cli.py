@@ -180,7 +180,7 @@ def sync_sector_data(
         try:
             result = await service.sync(
                 sector_type=sector_type,
-                trade_date=_market_now(settings.market_timezone).date(),
+                trade_date=_completed_daily_as_of(settings.market_timezone),
                 limit=limit,
                 include_members=include_members,
             )

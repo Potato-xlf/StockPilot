@@ -130,12 +130,22 @@ class AKShareDataSource(MarketDataSource):
         return records
 
     async def fetch_sectors(self, sector_type: str) -> list[SectorRecord]:
-        if sector_type == "industry":
-            frame = await asyncio.to_thread(ak.stock_board_industry_name_em)
-        elif sector_type == "concept":
-            frame = await asyncio.to_thread(ak.stock_board_concept_name_em)
-        else:
+        if sector_type not in {"industry", "concept"}:
             raise ValueError(f"Unsupported sector type: {sector_type}")
+        try:
+            if sector_type == "industry":
+                frame = await asyncio.to_thread(ak.stock_board_industry_name_em)
+            else:
+                frame = await asyncio.to_thread(ak.stock_board_concept_name_em)
+        except Exception as exc:
+            if sector_type != "industry":
+                raise
+            logger.warning(
+                "AKShare Eastmoney industry sectors failed; using THS fallback "
+                "error=%s",
+                exc,
+            )
+            return await self._fetch_industry_sectors_ths()
         return [
             SectorRecord(
                 code=str(row["板块代码"]),
@@ -156,6 +166,38 @@ class AKShareDataSource(MarketDataSource):
             )
             for _, row in frame.iterrows()
         ]
+
+    async def _fetch_industry_sectors_ths(self) -> list[SectorRecord]:
+        names, summary = await asyncio.gather(
+            asyncio.to_thread(ak.stock_board_industry_name_ths),
+            asyncio.to_thread(ak.stock_board_industry_summary_ths),
+        )
+        code_by_name = {
+            str(row["name"]): str(row["code"])
+            for _, row in names.iterrows()
+        }
+        records = [
+            SectorRecord(
+                code=code_by_name[str(row["板块"])],
+                name=str(row["板块"]),
+                sector_type="industry",
+                latest_price=_decimal(row.get("均价")),
+                pct_change=_decimal(row.get("涨跌幅")),
+                advancers=_optional_int(row.get("上涨家数")),
+                decliners=_optional_int(row.get("下跌家数")),
+                leading_stock=(
+                    str(row["领涨股"])
+                    if not pd.isna(row.get("领涨股"))
+                    else None
+                ),
+                leading_stock_pct=_decimal(row.get("领涨股-涨跌幅")),
+            )
+            for _, row in summary.iterrows()
+            if str(row["板块"]) in code_by_name
+        ]
+        if not records:
+            raise RuntimeError("AKShare THS returned no matched industry sectors")
+        return records
 
     async def fetch_sector_members(
         self, sector_code: str, sector_type: str
