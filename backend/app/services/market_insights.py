@@ -121,6 +121,37 @@ class SectorSyncRunSnapshot:
     finished_at: datetime | None
 
 
+@dataclass(frozen=True)
+class StockSnapshot:
+    symbol: str
+    name: str
+    exchange: str
+    list_status: str
+    quote_enabled: bool
+
+
+@dataclass(frozen=True)
+class DailyQuoteSnapshot:
+    trade_date: date
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    amount: float | None
+    amplitude: float | None
+    pct_change: float | None
+    change: float | None
+    turnover_rate: float | None
+
+
+@dataclass(frozen=True)
+class StockQuotesSnapshot:
+    symbol: str
+    name: str
+    items: list[DailyQuoteSnapshot]
+
+
 def _percentile(value: float | None, values: list[float]) -> float:
     if value is None or not values:
         return 0.0
@@ -164,6 +195,83 @@ def _rank_sector_rows(rows: list[dict]) -> list[dict]:
 class MarketInsightsService:
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def stocks(
+        self,
+        *,
+        query: str | None = None,
+        exchange: str | None = None,
+        quote_enabled: bool | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[StockSnapshot], int]:
+        """Return a paginated, deterministic view of the managed stock universe."""
+        statement = select(Stock)
+        count_statement = select(func.count()).select_from(Stock)
+        filters = [Stock.list_status == "listed"]
+        if query:
+            query = query.strip()
+            filters.append(or_(Stock.symbol.ilike(f"%{query}%"), Stock.name.ilike(f"%{query}%")))
+        if exchange:
+            filters.append(Stock.exchange == exchange.upper())
+        if quote_enabled is not None:
+            filters.append(Stock.quote_enabled.is_(quote_enabled))
+        statement = statement.where(*filters).order_by(Stock.symbol).offset(offset).limit(limit)
+        count_statement = count_statement.where(*filters)
+        rows = (await self.session.scalars(statement)).all()
+        total = int(await self.session.scalar(count_statement) or 0)
+        return (
+            [
+                StockSnapshot(
+                    symbol=row.symbol,
+                    name=row.name,
+                    exchange=row.exchange,
+                    list_status=row.list_status,
+                    quote_enabled=row.quote_enabled,
+                )
+                for row in rows
+            ],
+            total,
+        )
+
+    async def stock_quotes(self, symbol: str, limit: int = 30) -> StockQuotesSnapshot | None:
+        """Return the most recent daily quotes for one listed stock, oldest first."""
+        stock = await self.session.scalar(select(Stock).where(Stock.symbol == symbol))
+        if stock is None:
+            return None
+        rows = (
+            await self.session.scalars(
+                select(DailyQuote)
+                .where(DailyQuote.symbol == symbol)
+                .order_by(DailyQuote.trade_date.desc())
+                .limit(limit)
+            )
+        ).all()
+        rows = list(reversed(rows))
+
+        def number(value):
+            return float(value) if value is not None else None
+
+        return StockQuotesSnapshot(
+            symbol=stock.symbol,
+            name=stock.name,
+            items=[
+                DailyQuoteSnapshot(
+                    trade_date=row.trade_date,
+                    open=number(row.open),
+                    high=number(row.high),
+                    low=number(row.low),
+                    close=number(row.close),
+                    volume=number(row.volume),
+                    amount=number(row.amount),
+                    amplitude=number(row.amplitude),
+                    pct_change=number(row.pct_change),
+                    change=number(row.change),
+                    turnover_rate=number(row.turnover_rate),
+                )
+                for row in rows
+            ],
+        )
 
     async def sync_runs(
         self, limit: int = 20

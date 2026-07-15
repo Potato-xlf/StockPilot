@@ -101,3 +101,38 @@ class SectorSyncRunResponse(BaseModel):
 class SyncRunsResponse(BaseModel):
     data_runs: list[DataSyncRunResponse]
     sector_runs: list[SectorSyncRunResponse]
+
+
+class StockResponse(BaseModel):
+    symbol: str
+    name: str
+    exchange: str
+    list_status: str
+    quote_enabled: bool
+
+
+class StockListResponse(BaseModel):
+    items: list[StockResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class DailyQuoteResponse(BaseModel):
+    trade_date: date
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    amount: float | None
+    amplitude: float | None
+    pct_change: float | None
+    change: float | None
+    turnover_rate: float | None
+
+
+class StockQuotesResponse(BaseModel):
+    symbol: str
+    name: str
+    items: list[DailyQuoteResponse]

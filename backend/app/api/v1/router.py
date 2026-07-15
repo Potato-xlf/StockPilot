@@ -11,6 +11,8 @@ from app.schemas.market import (
     DataQualityResponse,
     MarketOverviewResponse,
     SectorRankingResponse,
+    StockListResponse,
+    StockQuotesResponse,
     SyncRunsResponse,
     UniverseStatusResponse,
 )
@@ -111,4 +113,47 @@ async def sync_runs(
     return SyncRunsResponse(
         data_runs=[run.__dict__ for run in data_runs],
         sector_runs=[run.__dict__ for run in sector_runs],
+    )
+
+
+@router.get("/stocks", response_model=StockListResponse)
+async def stocks(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    q: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+    exchange: Annotated[str | None, Query(min_length=3, max_length=8)] = None,
+    quote_enabled: bool | None = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> StockListResponse:
+    items, total = await MarketInsightsService(session).stocks(
+        query=q,
+        exchange=exchange,
+        quote_enabled=quote_enabled,
+        limit=limit,
+        offset=offset,
+    )
+    return StockListResponse(
+        items=[item.__dict__ for item in items],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/stocks/{symbol}/quotes", response_model=StockQuotesResponse)
+async def stock_quotes(
+    symbol: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    limit: Annotated[int, Query(ge=1, le=365)] = 30,
+) -> StockQuotesResponse:
+    normalized = symbol.strip()
+    if len(normalized) != 6 or not normalized.isdigit():
+        raise HTTPException(status_code=422, detail="symbol must be a 6-digit code")
+    snapshot = await MarketInsightsService(session).stock_quotes(normalized, limit)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="stock not found")
+    return StockQuotesResponse(
+        symbol=snapshot.symbol,
+        name=snapshot.name,
+        items=[item.__dict__ for item in snapshot.items],
     )

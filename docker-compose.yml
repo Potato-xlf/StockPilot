@@ -47,6 +47,16 @@ services:
     ports:
       - "8000:8000"
 
+  dashboard:
+    build: ./frontend
+    environment:
+      VITE_API_BASE_URL: ""
+      VITE_API_PROXY_TARGET: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "5173:5173"
+
 volumes:
   postgres_data:
-

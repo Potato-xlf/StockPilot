@@ -22,6 +22,14 @@ http://localhost:8000/docs
 ./start.sh --with-redis
 ```
 
+启动综合面板（Vue 3 + ECharts）：
+
+```bash
+docker compose up --build -d postgres api dashboard
+```
+
+打开 `http://localhost:5173`。面板当前展示市场概览、板块排行、数据质量、股票池和同步任务；个股查询接口也已提供给后续页面使用。
+
 停止全部本地服务：
 
 ```bash
@@ -73,6 +81,16 @@ curl 'http://localhost:8000/api/v1/sync/runs?limit=20'
 
 `/api/v1/sync/runs` 返回最近行情、股票池和板块同步记录，可用于排查
 `partial`/`error` 批次以及后续面板展示。
+
+面板开发模式（宿主机已安装 Node.js 22+）：
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+开发模式默认把 `/api` 代理到 `http://localhost:8000`；Docker Compose 会自动代理到 `api` 容器。
 
 ## 全市场股票池与板块轮动
 
