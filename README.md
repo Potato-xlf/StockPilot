@@ -4,6 +4,32 @@ StockPilot A 股选股面板的数据基础与市场运营层。技术栈为 Pyt
 
 ## 快速启动
 
+macOS/Linux 推荐直接运行一键启动脚本：
+
+```bash
+./start.sh
+```
+
+脚本会自动检查 Docker、首次创建 `.env`、构建并启动 PostgreSQL 与 API，等待健康检查通过后显示访问地址。完成后打开：
+
+```text
+http://localhost:8000/docs
+```
+
+可选 Redis：
+
+```bash
+./start.sh --with-redis
+```
+
+停止全部本地服务：
+
+```bash
+docker compose down
+```
+
+也可以手动启动：
+
 ```bash
 cp .env.example .env
 docker compose up --build -d postgres api
