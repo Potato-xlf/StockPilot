@@ -1,3 +1,21 @@
-from app.models.market import DailyQuote, DataSyncRun, Stock, TradingCalendar
+from app.models.market import (
+    DailyQuote,
+    DataSyncRun,
+    Sector,
+    SectorMember,
+    SectorSnapshot,
+    SectorSyncRun,
+    Stock,
+    TradingCalendar,
+)
 
-__all__ = ["DailyQuote", "DataSyncRun", "Stock", "TradingCalendar"]
+__all__ = [
+    "DailyQuote",
+    "DataSyncRun",
+    "Sector",
+    "SectorMember",
+    "SectorSnapshot",
+    "SectorSyncRun",
+    "Stock",
+    "TradingCalendar",
+]

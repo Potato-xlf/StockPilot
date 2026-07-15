@@ -6,7 +6,13 @@ from decimal import Decimal
 import akshare as ak
 import pandas as pd
 
-from app.data_sources.base import DailyQuoteRecord, MarketDataSource, StockRecord
+from app.data_sources.base import (
+    DailyQuoteRecord,
+    MarketDataSource,
+    SectorMemberRecord,
+    SectorRecord,
+    StockRecord,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +24,10 @@ def _decimal(value: object) -> Decimal | None:
 
 
 def _exchange(symbol: str) -> str:
+    if symbol.startswith(("4", "8", "92")):
+        return "BSE"
     if symbol.startswith(("5", "6", "9")):
         return "SSE"
-    if symbol.startswith(("4", "8")):
-        return "BSE"
     return "SZSE"
 
 
@@ -29,6 +35,11 @@ def _tencent_symbol(symbol: str) -> str:
     exchange = _exchange(symbol)
     prefix = {"SSE": "sh", "BSE": "bj", "SZSE": "sz"}[exchange]
     return f"{prefix}{symbol}"
+
+
+def _optional_int(value: object) -> int | None:
+    decimal_value = _decimal(value)
+    return int(decimal_value) if decimal_value is not None else None
 
 
 class AKShareDataSource(MarketDataSource):
@@ -117,3 +128,53 @@ class AKShareDataSource(MarketDataSource):
                 )
             )
         return records
+
+    async def fetch_sectors(self, sector_type: str) -> list[SectorRecord]:
+        if sector_type == "industry":
+            frame = await asyncio.to_thread(ak.stock_board_industry_name_em)
+        elif sector_type == "concept":
+            frame = await asyncio.to_thread(ak.stock_board_concept_name_em)
+        else:
+            raise ValueError(f"Unsupported sector type: {sector_type}")
+        return [
+            SectorRecord(
+                code=str(row["板块代码"]),
+                name=str(row["板块名称"]),
+                sector_type=sector_type,
+                latest_price=_decimal(row.get("最新价")),
+                pct_change=_decimal(row.get("涨跌幅")),
+                turnover_rate=_decimal(row.get("换手率")),
+                total_market_cap=_decimal(row.get("总市值")),
+                advancers=_optional_int(row.get("上涨家数")),
+                decliners=_optional_int(row.get("下跌家数")),
+                leading_stock=(
+                    str(row["领涨股票"])
+                    if not pd.isna(row.get("领涨股票"))
+                    else None
+                ),
+                leading_stock_pct=_decimal(row.get("领涨股票-涨跌幅")),
+            )
+            for _, row in frame.iterrows()
+        ]
+
+    async def fetch_sector_members(
+        self, sector_code: str, sector_type: str
+    ) -> list[SectorMemberRecord]:
+        if sector_type == "industry":
+            frame = await asyncio.to_thread(
+                ak.stock_board_industry_cons_em, symbol=sector_code
+            )
+        elif sector_type == "concept":
+            frame = await asyncio.to_thread(
+                ak.stock_board_concept_cons_em, symbol=sector_code
+            )
+        else:
+            raise ValueError(f"Unsupported sector type: {sector_type}")
+        return [
+            SectorMemberRecord(
+                symbol=str(row["代码"]).zfill(6),
+                name=str(row["名称"]),
+                exchange=_exchange(str(row["代码"]).zfill(6)),
+            )
+            for _, row in frame.iterrows()
+        ]

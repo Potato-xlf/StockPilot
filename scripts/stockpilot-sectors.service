@@ -1,0 +1,14 @@
+[Unit]
+Description=StockPilot industry and concept sector snapshot sync
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/stockpilot/repo
+ExecStart=/opt/stockpilot/repo/scripts/sync_sectors.sh
+TimeoutStartSec=2h
+Nice=10
+CPUWeight=10
+IOSchedulingClass=idle
+IOSchedulingPriority=7

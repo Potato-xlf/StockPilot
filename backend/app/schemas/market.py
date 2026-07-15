@@ -35,3 +35,39 @@ class MarketOverviewResponse(BaseModel):
     total_amount: float | None
     amount_coverage_pct: float
     data_quality_status: Literal["ok", "warning", "error"]
+
+
+class SectorRankingItemResponse(BaseModel):
+    rank: int
+    previous_rank: int | None
+    rank_change: int | None
+    code: str
+    name: str
+    score: float
+    pct_change: float | None
+    turnover_rate: float | None
+    breadth_pct: float | None
+    advancers: int | None
+    decliners: int | None
+    leading_stock: str | None
+    leading_stock_pct: float | None
+    member_count: int
+
+
+class SectorRankingResponse(BaseModel):
+    as_of: date
+    previous_trade_date: date | None
+    sector_type: Literal["industry", "concept"]
+    total_sectors: int
+    items: list[SectorRankingItemResponse]
+
+
+class UniverseStatusResponse(BaseModel):
+    total_listed_stocks: int
+    quote_enabled_stocks: int
+    pending_quote_stocks: int
+    exchange_counts: dict[str, int]
+    last_universe_sync_status: str | None
+    last_universe_sync_finished_at: datetime | None
+    last_quote_batch_status: str | None
+    last_quote_batch_finished_at: datetime | None

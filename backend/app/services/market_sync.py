@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -12,12 +12,23 @@ from app.data_sources.base import MarketDataSource, StockRecord
 from app.models import DailyQuote, DataSyncRun, Stock, TradingCalendar
 
 logger = logging.getLogger(__name__)
+UPSERT_BATCH_SIZE = 1000
 
 
 @dataclass
 class SyncResult:
     run_id: int | None = None
     status: str = "running"
+    stocks: int = 0
+    quotes: int = 0
+    failed_symbols: int = 0
+    message: str | None = None
+
+
+@dataclass
+class UniverseSyncResult:
+    run_id: int | None = None
+    status: str = "completed"
     stocks: int = 0
     quotes: int = 0
     failed_symbols: int = 0
@@ -37,19 +48,29 @@ class MarketSyncService:
         self.semaphore = asyncio.Semaphore(concurrency)
         self.retries = retries
 
-    async def _upsert(self, model: type, rows: list[dict], keys: list[str]) -> None:
+    async def _upsert(
+        self,
+        model: type,
+        rows: list[dict],
+        keys: list[str],
+        update_columns: set[str] | None = None,
+    ) -> None:
         if not rows:
             return
         async with self.session_factory() as session, session.begin():
-            statement = insert(model).values(rows)
-            updates = {
-                column.name: getattr(statement.excluded, column.name)
-                for column in model.__table__.columns
-                if column.name not in keys and column.name != "created_at"
-            }
-            await session.execute(
-                statement.on_conflict_do_update(index_elements=keys, set_=updates)
-            )
+            for start in range(0, len(rows), UPSERT_BATCH_SIZE):
+                batch = rows[start : start + UPSERT_BATCH_SIZE]
+                statement = insert(model).values(batch)
+                updates = {
+                    column.name: getattr(statement.excluded, column.name)
+                    for column in model.__table__.columns
+                    if column.name not in keys
+                    and column.name != "created_at"
+                    and (update_columns is None or column.name in update_columns)
+                }
+                await session.execute(
+                    statement.on_conflict_do_update(index_elements=keys, set_=updates)
+                )
 
     async def _start_run(self, job_type: str, requested_days: int) -> int:
         async with self.session_factory() as session, session.begin():
@@ -79,12 +100,28 @@ class MarketSyncService:
                 )
             )
 
-    async def _existing_stocks(self, limit: int | None) -> list[StockRecord]:
-        statement = (
-            select(Stock)
-            .where(Stock.list_status == "listed")
-            .order_by(Stock.symbol)
+    async def _fetch_stock_list(self) -> list[StockRecord]:
+        @retry(
+            stop=stop_after_attempt(self.retries),
+            wait=wait_exponential(min=1, max=8),
+            reraise=True,
         )
+        async def fetch():
+            return await self.source.fetch_stock_list()
+
+        return await fetch()
+
+    async def _existing_stocks(
+        self,
+        limit: int | None,
+        offset: int = 0,
+        *,
+        quote_enabled_only: bool = True,
+    ) -> list[StockRecord]:
+        statement = select(Stock).where(Stock.list_status == "listed")
+        if quote_enabled_only:
+            statement = statement.where(Stock.quote_enabled.is_(True))
+        statement = statement.order_by(Stock.symbol).offset(offset)
         if limit is not None:
             statement = statement.limit(limit)
         async with self.session_factory() as session:
@@ -93,6 +130,38 @@ class MarketSyncService:
             StockRecord(symbol=stock.symbol, name=stock.name, exchange=stock.exchange)
             for stock in rows
         ]
+
+    async def sync_stock_universe(self, limit: int | None = None) -> UniverseSyncResult:
+        result = UniverseSyncResult(run_id=await self._start_run("universe", 0))
+        try:
+            stocks = await self._fetch_stock_list()
+            if limit is not None:
+                stocks = stocks[:limit]
+            await self._upsert(
+                Stock,
+                [
+                    {
+                        "symbol": stock.symbol,
+                        "name": stock.name,
+                        "exchange": stock.exchange,
+                        "list_status": "listed",
+                        "source": self.source.name,
+                    }
+                    for stock in stocks
+                ],
+                ["symbol"],
+                update_columns={"name", "exchange", "list_status", "source"},
+            )
+            result.stocks = len(stocks)
+            await self._finish_run(result)
+            logger.info("stock universe sync complete stocks=%d", len(stocks))
+            return result
+        except Exception as exc:
+            result.status = "error"
+            result.message = str(exc)[:512]
+            await self._finish_run(result)
+            logger.exception("stock universe sync failed run_id=%s", result.run_id)
+            raise
 
     async def sync(
         self,
@@ -103,6 +172,9 @@ class MarketSyncService:
         use_existing_universe: bool = False,
         require_open_day: bool = False,
         as_of: date | None = None,
+        offset: int = 0,
+        include_disabled: bool = False,
+        enable_synced_stocks: bool = False,
     ) -> SyncResult:
         result = SyncResult(run_id=await self._start_run(job_type, days))
         try:
@@ -120,13 +192,17 @@ class MarketSyncService:
                 raise RuntimeError("No trading days returned by data source")
 
             if use_existing_universe:
-                stocks = await self._existing_stocks(limit)
+                stocks = await self._existing_stocks(
+                    limit,
+                    offset,
+                    quote_enabled_only=not include_disabled,
+                )
                 if not stocks:
                     raise RuntimeError(
                         "Managed stock universe is empty; run sync-market-data first"
                     )
             else:
-                stocks = await self.source.fetch_stock_list()
+                stocks = await self._fetch_stock_list()
                 if limit is not None:
                     stocks = stocks[:limit]
                 await self._upsert(
@@ -136,6 +212,7 @@ class MarketSyncService:
                             "symbol": stock.symbol,
                             "name": stock.name,
                             "exchange": stock.exchange,
+                            "quote_enabled": True,
                             "source": self.source.name,
                         }
                         for stock in stocks
@@ -173,6 +250,8 @@ class MarketSyncService:
                             )
 
                         quotes = await fetch()
+                        if enable_synced_stocks and not quotes:
+                            raise RuntimeError(f"No daily quotes returned for {symbol}")
                         await self._upsert(
                             DailyQuote,
                             [
@@ -182,6 +261,13 @@ class MarketSyncService:
                             ["symbol", "trade_date"],
                         )
                         result.quotes += len(quotes)
+                        if enable_synced_stocks:
+                            async with self.session_factory() as session, session.begin():
+                                await session.execute(
+                                    update(Stock)
+                                    .where(Stock.symbol == symbol)
+                                    .values(quote_enabled=True, updated_at=func.now())
+                                )
                         logger.info("synced symbol=%s rows=%d", symbol, len(quotes))
                     except Exception:
                         result.failed_symbols += 1
@@ -222,4 +308,23 @@ class MarketSyncService:
             use_existing_universe=True,
             require_open_day=True,
             as_of=as_of,
+        )
+
+    async def sync_quote_batch(
+        self,
+        days: int = 30,
+        batch_size: int = 100,
+        offset: int = 0,
+        *,
+        as_of: date | None = None,
+    ) -> SyncResult:
+        return await self.sync(
+            days=days,
+            limit=batch_size,
+            job_type="quote_batch",
+            use_existing_universe=True,
+            as_of=as_of,
+            offset=offset,
+            include_disabled=True,
+            enable_synced_stocks=True,
         )
